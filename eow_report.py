@@ -131,7 +131,6 @@ def write_formatted_excel(df, output_file):
         # Freeze panes so that rows 0-2 (title and header) remain visible.
         worksheet.freeze_panes(3, 0)
         
-
     print(f"Clean report saved to '{output_file}'")
 
 def main():
@@ -140,5 +139,23 @@ def main():
     
     # Find the latest EOW file in the directory.
     input_file = find_latest_eow_file(directory)
+    print(f"Using input file: {input_file}")
+    
+    # Clean and format the raw data.
+    cleaned_df = clean_spreadsheet(input_file)
+    
+    # Define the output file name (saved in the same folder as the raw data).
+    output_file = os.path.join(directory, "clean_report.xlsx")
+    
+    # Write the cleaned data to a new Excel file with finalized formatting.
+    write_formatted_excel(cleaned_df, output_file)
+    
+    # Display a preview in the console.
+    print("Final Report Preview:")
+    print(cleaned_df.head(10))
+
+if __name__ == '__main__':
+    main()
+
 
 
