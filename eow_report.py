@@ -93,8 +93,8 @@ def main():
     # Clean the data from the input file.
     cleaned_data = clean_spreadsheet(input_file)
     
-    # Define the output file name (adjust path if needed).
-    output_file = "clean_report.xlsx"
+    # Define the output file name so it is saved in the same folder as the raw data.
+    output_file = os.path.join(directory, "clean_report.xlsx")
     
     # Write the cleaned data to a new Excel file with finalized formatting.
     write_formatted_excel(cleaned_data, output_file)
