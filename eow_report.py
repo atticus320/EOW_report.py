@@ -25,12 +25,15 @@ def clean_spreadsheet(input_file):
       - Event: Original column.
       - Prior: Original column.
       - Survey: Original column.
-    After sorting, for each day only the first occurrence shows the date and subsequent rows are blank.
+    
+    After sorting, for each day the first occurrence shows the date (via a groupby) 
+    while subsequent rows have an empty Date. This ensures that no day (e.g., 3/31/2025) is omitted.
     """
     df = pd.read_excel(input_file)
     print("Original columns:", df.columns.tolist())
     
     df_clean = df.copy()
+    
     # Convert "Date Time" to datetime
     df_clean['Date Time'] = pd.to_datetime(df_clean['Date Time'], errors='coerce')
     
@@ -42,28 +45,36 @@ def clean_spreadsheet(input_file):
     final_columns = ['Date', 'Time', 'Event', 'Prior', 'Survey']
     clean_df = df_clean[final_columns].copy()
     
-    # Sort by Date and Time
-    clean_df = clean_df.sort_values(by=['Date', 'Time'])
+    # Create a temporary column for proper grouping (as datetime) so each date is recognized
+    clean_df['DateOrig'] = pd.to_datetime(clean_df['Date'], format="%m/%d/%Y", errors='coerce')
     
-    # For each date, display the date only on the first occurrence; clear it on subsequent rows.
-    clean_df.loc[clean_df.duplicated(subset='Date'), 'Date'] = ""
+    # Sort by DateOrig and Time to ensure correct order
+    clean_df = clean_df.sort_values(by=['DateOrig', 'Time'])
+    
+    # For each date group, keep the date in the first row and blank out subsequent rows.
+    def blank_group(g):
+        g.iloc[1:, g.columns.get_loc('Date')] = ''
+        return g
+    clean_df = clean_df.groupby('DateOrig', group_keys=False).apply(blank_group)
+    
+    # Drop the temporary column.
+    clean_df.drop(columns='DateOrig', inplace=True)
     
     return clean_df
 
 def write_formatted_excel(df, output_file):
     """
     Write the DataFrame to an Excel file with finalized formatting using xlsxwriter.
-    Additional tweaks:
-      - A merged title row at the top displaying "Weekly Economic Reports" and the report period.
-      - Freeze panes so that title and header remain visible.
+    Additional tweaks include:
+      - A merged title row at the top displaying "This Week in Markets:" and the report period.
+      - Freeze panes so that the title and header remain visible.
       - Charles Schwab header format: dark blue (#003876) with white text, Arial font.
       - Columns B–E (Time, Event, Prior, Survey) are right-aligned.
     """
-    # Determine the report period from the non-blank Date values.
+    # Determine the report period from non-blank Date values.
     date_values = [cell for cell in df['Date'] if cell != ""]
     if date_values:
-        # Convert date strings to datetime objects for comparison.
-        dates = pd.to_datetime(date_values, format="%m/%d/%Y")
+        dates = pd.to_datetime(date_values, format="%m/%d/%Y", errors='coerce')
         report_start = dates.min().strftime("%m/%d/%Y")
         report_end = dates.max().strftime("%m/%d/%Y")
         report_period = f"Period: {report_start} - {report_end}"
@@ -71,13 +82,13 @@ def write_formatted_excel(df, output_file):
         report_period = ""
     
     with pd.ExcelWriter(output_file, engine='xlsxwriter') as writer:
-        # Write data starting at row 2 (leaving row 0 for the title and row 1 for the header)
+        # Write data starting at row 2 (leaving rows 0 and 1 for the title and header)
         df.to_excel(writer, index=False, sheet_name="Report", startrow=2, header=False)
         
         workbook = writer.book
         worksheet = writer.sheets["Report"]
         
-        # Define title format (merged cell) – bold, larger font, dark blue background, white text.
+        # Define title format for merged title row.
         title_format = workbook.add_format({
             'bold': True,
             'font_name': 'Arial',
@@ -88,7 +99,7 @@ def write_formatted_excel(df, output_file):
             'font_color': '#FFFFFF'
         })
         # Merge cells A1 to E1 for the title.
-        worksheet.merge_range('A1:E1', f"Weekly Economic Reports   {report_period}", title_format)
+        worksheet.merge_range('A1:E1', f"This Week in Markets:   {report_period}", title_format)
         
         # Define header format using Charles Schwab colors.
         header_format = workbook.add_format({
@@ -101,17 +112,17 @@ def write_formatted_excel(df, output_file):
             'font_color': '#FFFFFF',  # White text
             'border': 1
         })
-        # Write headers in row 2 (which is Excel row 2+1=3, but our startrow=2 means row index 2)
+        # Write headers in row 3 (0-indexed row 2)
         for col_num, header in enumerate(df.columns.values):
             worksheet.write(2, col_num, header, header_format)
         
         # Determine table range (including header row, starting from row 3 in Excel terms)
         max_row, max_col = df.shape
-        total_rows = max_row + 2  # +2 because we added two extra rows (title and header)
+        total_rows = max_row + 2  # +2 for the title and header rows
         last_col_letter = chr(65 + max_col - 1)  # Assumes fewer than 26 columns.
         table_range = f"A2:{last_col_letter}{total_rows}"
         
-        # Add an Excel table for extra polish.
+        # Add an Excel table for polish.
         worksheet.add_table(table_range, {
             'header_row': True,
             'style': 'Table Style Medium 9',
@@ -128,7 +139,7 @@ def write_formatted_excel(df, output_file):
         worksheet.set_column('D:D', 10, right_align_format)  # Prior column
         worksheet.set_column('E:E', 10, right_align_format)  # Survey column
         
-        # Freeze panes so that rows 0-2 (title and header) remain visible.
+        # Freeze panes so that the title and header remain visible (freeze below row 3).
         worksheet.freeze_panes(3, 0)
         
     print(f"Clean report saved to '{output_file}'")
@@ -137,14 +148,14 @@ def main():
     # Define the directory where your weekly EOW files are stored.
     directory = r"M:/Trading/8. Miscellaneous/This Week In Markets"
     
-    # Find the latest EOW file in the directory.
+    # Find the latest EOW file.
     input_file = find_latest_eow_file(directory)
     print(f"Using input file: {input_file}")
     
     # Clean and format the raw data.
     cleaned_df = clean_spreadsheet(input_file)
     
-    # Define the output file name (saved in the same folder as the raw data).
+    # Define the output file name so it is saved in the same folder as the raw data.
     output_file = os.path.join(directory, "clean_report.xlsx")
     
     # Write the cleaned data to a new Excel file with finalized formatting.
@@ -156,6 +167,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
